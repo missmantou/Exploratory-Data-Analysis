@@ -1,0 +1,294 @@
+---
+title: "Untitled"
+author: "Eden ye"
+date: "8/28/2019"
+output: html_document
+---
+
+
+```{r}
+library(knitr)
+library(tidyverse)
+library(viridis)
+library(purrr)
+library(scales)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(gridExtra)
+library(ggthemes)
+library(markdown)
+library(rmarkdown)
+library(ggplot2)
+library(ggforce)
+library(dplyr)
+library(fpp2)
+library(tidyr)
+#install.packages('stringr')
+library(stringr)
+library(reshape2)
+library(plotly)
+library(plotrix)
+library(RColorBrewer)
+library(splitstackshape)
+library(data.table)
+
+```
+
+
+```{r}
+#Sahir's cleaned section data
+SectionData <- readRDS("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/sectionData.rds")
+
+#Winter Data
+SectionDataWinter <- SectionData %>% 
+  filter(SEC_SES_CD =="W")
+
+#New dept to faculty data
+Dept_to_Faculty <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/Course Codes to Faculty-08.02.19.csv")
+
+#Master Room Data
+Room <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/masterClassroom_comnpleteMatrix.csv")
+
+#All room data from facilities planning website
+allroomdata <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/outRoomData_all_room_data.csv")
+```
+
+
+
+```{r}
+Faculty_or_School_2 <- c("Faculty of Applied Science","Faculty of Arts","Faculty of Dentistry","Faculty of Education","Faculty of Forestry","Faculty of Graduate and Postdoctoral Studies","Faculty of Land and Food Systems","Faculty of Medicine","Faculty of Pharmaceutical Sciences","Faculty of Science","Peter A. Allard School of Law","Sauder School of Business","Vantage College","Other")
+```
+
+
+```{r}
+for (i in Faculty_or_School_2) {
+  print(i)
+  
+  SectionDataWinter %>% 
+  left_join(Dept_to_Faculty %>% select(Subject.Code, `Faculty...School`),by=c("CRS_DPT_CD" = "Subject.Code" )) %>% 
+  mutate(newroomgroup = case_when(roomGroup %in% c("1-20","21-50","51-70","71-100")~ "1-100",
+                                   roomGroup %in% c("101-150","151-200")~"101-200",
+                                   roomGroup %in% c("201-300")~"201-300",
+                                   roomGroup == "Over 300" ~ "Over 300")) %>% 
+  mutate(roomtype = case_when(isGTS == 0 ~"RTS",
+                               isGTS == 1 & inTier1 == 0 ~ "GTS no Tier 1",
+                               isGTS == 1 & inTier1 == 1 ~ "GTS Tier 1")) %>% 
+  drop_na(newroomgroup) %>% 
+  filter(SEC_SES == "2018W") %>% 
+  filter(Faculty...School == i) %>%
+  group_by(Faculty...School,roomtype,newroomgroup) %>% 
+  summarise(Count = n_distinct(Section)) -> a
+  
+  print(a)
+  
+  sumcount <- 
+    a %>% 
+    group_by(roomtype) %>% 
+    summarise(count = sum(Count))
+  
+  a$roomtype = factor(a$roomtype, levels=c("RTS","GTS Tier 1","GTS no Tier 1"))
+    
+  print(
+          ggplot(a,aes(x=roomtype,y=Count))+
+          geom_bar(aes(fill=newroomgroup),stat = "identity",width=0.5) +
+          theme_minimal()+
+          labs(y = "Num of Sections") +
+          labs(x = "") +
+          geom_text(data = sumcount, 
+           aes(y = count, label = count), size = 4,
+           vjust = -0.5)+
+          ggtitle (a$Faculty...School)
+          
+          )
+}
+
+```
+
+# of RTS and GTS Tier 1 rooms for each faculty/school
+
+```{r}
+# This chunk of codes is to prepare the dataset for calculating the # of RTS and GTS Tier 1 rooms for each faculty
+
+#get all the department columns 
+which(colnames(Room)=="S..AANB.V" )->a
+which(colnames(Room)=="S..ZOOL.V" )->b
+which(colnames(Room)=="Name_left" )->c
+which(colnames(Room)=="S..FCOR.V.1"）->d
+
+col <- c(c,a:b,d )
+Room[,col]->room_dept
+
+#Get the 4 letters course dept code
+colnames(room_dept) <- substr(colnames(room_dept),4,7)
+
+setnames(room_dept, old = c('e_le',"STS.","OHS.","LFS.","LAW.","GPP.","GEM.","FRE.","FNH.","DES.","BA.V","GRS.","HPB.","KIN.","LWS."), new = c('Name',"STS","OHS","LFS","LAW","GPP","GEM","FRE","FNH","DES","BA","GRS","HPB","KIN","LWS"))
+
+room_dept %>% 
+  drop_na() ->room_dept
+
+#Convert the name column to row names
+room_dept$Name<-as.character(room_dept$Name)
+rownames(room_dept) <- room_dept$Name
+room_dept <- room_dept[,-1]
+
+#Transpose the room department table
+room_dept<-room_dept %>% 
+   rownames_to_column %>% 
+   gather(var, value, -rowname) %>% 
+   spread(rowname, value) 
+
+# Aggregate the same faculty/school together
+room_dept %>% 
+  left_join(Dept_to_Faculty %>% select(`Subject.Code`,`Faculty...School`), by = c("var" = "Subject.Code")) %>% 
+  drop_na() %>% 
+  select(`Faculty...School`,everything(),-`var`) %>% 
+  # mutate(`Faculty...School` = ifelse(is.na(`Faculty...School`),"Others",as.character(`Faculty...School`))) %>% 
+  group_by(`Faculty...School`) %>% 
+  summarise_each(funs(sum)) -> faculty_room
+
+
+#Convert the name column to row names
+faculty_room$`Faculty...School`<-as.character(faculty_room$`Faculty...School`)
+faculty_room <- as.data.frame(faculty_room)
+rownames(faculty_room) <- faculty_room$`Faculty...School`
+faculty_room <- faculty_room[,-1]
+
+#Transpose faculty_room table to room_faculty
+room_faculty<-faculty_room %>% 
+   rownames_to_column %>% 
+   gather(var, value, -rowname) %>% 
+   spread(rowname, value) 
+
+#Count how many faculties have Tier1 access to one room
+room_faculty <-room_faculty %>% 
+  mutate(count=rowSums(.[2:14]!=0))
+
+#Join the all room data to get the capcity column 
+room_faculty <-room_faculty %>% 
+  left_join(allroomdata %>% select(`isGTS`,`Capacity`,`Name`),by=c("var" = "Name" )) %>% 
+  mutate(`var` = case_when(
+      `var` == "ANGU 037" ~ "ANGU 37",
+      `var` == "ANGU 038" ~ "ANGU 38",
+      `var` == "ANGU 039" ~ "ANGU 39",
+      `var` == "ANGU 039" ~ "ANGU 39",
+      `var` == "ICCS 005" ~ "ICCS 5",
+      `var` == "ICCS 008" ~ "ICCS 8",
+      `var` == "ICCS 011" ~ "ICCS 11",
+      `var` == "ICCS 014" ~ "ICCS 14",
+      `var` == "ICCS 015" ~ "ICCS 15",
+      `var` == "BIOL 0505" ~ "BIOL 505",
+      `var` == "BIOL 0509" ~ "BIOL 509",
+      TRUE ~ `var`))
+
+```
+
+
+```{r}
+#Below are the calculation for the number of RTS and GTS Tier 1 rooms for each faculty/school
+room_faculty %>% 
+  mutate(roomgroup = case_when(Capacity >0 & Capacity <=100 ~ "1-100",
+                               Capacity >100 & Capacity <=200 ~"101-200",
+                               Capacity >200 & Capacity<=300 ~ "201-300",
+                               Capacity >300 ~ "Over 300")) %>% 
+  filter(isGTS == "Unchecked") -> RTS
+room_faculty %>% 
+  mutate(roomgroup = case_when(Capacity >0 & Capacity <=100 ~ "1-100",
+                               Capacity >100 & Capacity <=200 ~"101-200",
+                               Capacity >200 & Capacity<=300 ~ "201-300",
+                               Capacity >300 ~ "Over 300")) %>% 
+  filter(isGTS == "Checked") -> GTS
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Applied Science`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Applied Science`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Arts`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Arts`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Dentistry`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Dentistry`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Education`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Education`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Forestry`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Forestry`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Graduate and Postdoctoral Studies`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Graduate and Postdoctoral Studies`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Land and Food Systems`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Land and Food Systems`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Medicine`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Medicine`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Pharmaceutical Sciences`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Pharmaceutical Sciences`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Science`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Faculty of Science`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Peter A. Allard School of Law`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Peter A. Allard School of Law`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Sauder School of Business`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Sauder School of Business`!=0))
+
+RTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Vantage College`!=0))
+GTS %>% 
+  group_by(roomgroup) %>% 
+  summarise(sum(`Vantage College`!=0))
+
+```
+

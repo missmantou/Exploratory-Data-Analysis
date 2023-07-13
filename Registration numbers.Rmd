@@ -1,0 +1,140 @@
+---
+title: "Registration Numbers"
+author: "Eden ye"
+date: "7/3/2019"
+output: html_document
+---
+
+## Identify the evolution of classroom usage and where the classrooms are for departments year by year 
+
+```{r setup, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(ggthemes)
+library(ggplot2)
+```
+
+```{r}
+#2013 data cleaned for total registration analyisis
+TotalEnrol <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/dataFrame_TotalEnrol.csv")
+
+#New dept to faculty data
+Dept_to_Faculty <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/Course Codes to Faculty-08.02.19.csv")
+
+```
+
+NEW COURSE DEPT CODE TO FACULTY/SCHOOL MAPPING
+```{r}
+#Faculty/School List
+Faculty_or_School <- c("Faculty_of_Applied_Science","Faculty_of_Arts","Faculty_of_Dentistry","Faculty_of_Education","Faculty_of_Forestry","Faculty_of_Graduate_and_Postdoctoral_Studies","Faculty_of_Land_and_Food_Systems","Faculty_of_Medicine","Faculty_of_Pharmaceutical_Sciences","Faculty_of_Science","PeterA._Allard_School_of_Law","Sauder_school_of_Business","Vantage_College","Other")
+Faculty_or_School_2 <- c("Faculty of Applied Science","Faculty of Arts","Faculty of Dentistry","Faculty of Education","Faculty of Forestry","Faculty of Graduate and Postdoctoral Studies","Faculty of Land and Food Systems","Faculty of Medicine","Faculty of Pharmaceutical Sciences","Faculty of Science","Peter A. Allard School of Law","Sauder School of Business","Vantage College","Other")
+
+#Course dept code to faculty/school
+Faculty_of_Applied_Science <- c("APPP","APSC","ARCH","BMEG","CEEN","CHBE","CICS","CIVL","CPEN","DES","EECE","ELEC","ENDS","ENPP","GBPR","HPB","IGEN","IWME","LARC","MINE","MTRL","NAME","NURS","PLAN","SGES","UDES","URSY","VURS")
+Faculty_of_Arts <- c("ACAM","AFST","ANTH","ARBC","ARCL","ARST","ARTH","ARTS","ASIA","ASLA","ASTU","CCST","CDST","CENS","CHIL","CHIN","CLCH","CLST","CNRS","CNTO","COLX","CRWR","CSIS","CTLN","DANI","DMED","ECON","ENGL","FACT","FHIS","FIPR","FIST","FMST","FNEL","FNIS","FREN","GEOB","GEOG","GERM","GPP","GREK","GRSJ","HEBR","HESO","HINU","HIST","IAR","IEST","INDO","INFO","INLB","ITAL","ITST","JAPN","JRNL","KORN","LAIS","LASO","LAST","LATN","LIBR","LING","MDVL","MUSC","NEST","PERS","PHIL","POLI","POLS","PORT","PSYC","PUNJ","RELG","RGLA","RMST","RUSS","SANS","SCAN","SEAL","SLAV","SOAL","SOCI","SOWK","SPAN","SWED","THTR","TIBT","UKRN","URST","VISA","WRDS")
+Faculty_of_Dentistry <- c("DENT","DHYG","OBMS","OHS")
+Faculty_of_Education <- c("ADHE","CCFI","CNPS","ECED","ECPS","EDCP","EDST","EDUC","EPSE","ETEC","KIN","LIBE","LLED","VRHC")
+Faculty_of_Forestry <- c("CONS","FEBC","FOPR","FRSI","FRST","GEM","HGSE","UFOR","WOOD")
+Faculty_of_Graduate_and_Postdoctoral_Studies <- c("INDS","STS","VGRD")
+Faculty_of_Land_and_Food_Systems<- c("AANB","AGEC","ANSC","APBI","FNH","FOOD","FRE","GRS","HUNU","LFS","LWS","PLNT","SOIL")
+Faculty_of_Medicine <- c("ANAT","AUDI","BIOC","BRDG","CAPS","CELL","FMPR","FSCT","GENE","INDE","MEDD","MEDG","MEDI","MIDW","NEUR","NRSC","OBST","ONCO","ORNT","ORPA","OSOT","PATH","PCTH","PHTH","PHYL","PLAS","PSYT","RADI","RHSC","RSOT","SPHA","SPPH","SURG","UROL")
+Faculty_of_Pharmaceutical_Sciences <- c("PHAR","PHRM")
+Faculty_of_Science <- c("ARC","ASIC","ASTR","ATSC","BIOF","BIOL","BIOT","BOTA","CHEM","COGS","CPSC","CSPW","DSCI","ENPH","ENVR","EOSC","FISH","GSAT","ISCI","MATH","MICB","MRNE","PHYS","RES","SCIE","STAT","ZOOL")
+PeterA._Allard_School_of_Law <- c("LAW")
+Sauder_school_of_Business <- c("BA","BAAC","BABS","BAEN","BAFI","BAHC","BAHR","BAIM","BAIT","BALA","BAMA","BAMS","BAPA","BASC","BASD","BASM","BATL","BAUL","BUSI","COEC","COHR","COMM","COMR","EMBA")
+Vantage_College <- c("MECH","MGMT","VANT")
+Other <- c("ELI","EXCH","EXGR","TRSC","URO","WRIT")
+```
+
+
+1.	Total Course Registration Trend – University Level
+```{r}
+######################################
+#Total Number of Registration
+######################################
+TotalEnrol %>% 
+  filter(SEC_SES_CD == "W",Total_Enrolment>0) %>%
+  group_by(SEC_SES_YR) %>% 
+  summarize(TotalEnrolment = sum(Total_Enrolment)) %>% 
+  rename(Year = SEC_SES_YR) %>% 
+  mutate(percentage_change = (TotalEnrolment-lag(TotalEnrolment))/lag(TotalEnrolment)) -> df3
+
+df3
+
+p <- ggplot(df3,aes(x=Year,y=TotalEnrolment/1000))+
+  geom_line(size=1,col="blue") +
+  geom_point() +
+  theme_clean()+
+  geom_text(aes(label = round(TotalEnrolment/1000, 1)),
+            vjust = 0, hjust = 1, angle = 0,position = position_dodge(width = 1),
+            show.legend = FALSE)+
+  labs(y = "Total Course Registration (in thousands)") +
+  scale_x_continuous("Year",labels = df3$Year, breaks = df3$Year)+
+  ggtitle("Total Course Registration Trend from 2013 to 2018") 
+p
+#ggsave("TotalCourseRegistration.png")
+
+```
+
+
+```{r}
+#Total registration number trend on faculty level
+TotalEnrol %>% 
+  left_join(Dept_to_Faculty,by=c("CRS_DPT_CD" = "Subject.Code")) %>% 
+  filter(SEC_SES_CD == "W",Total_Enrolment>0) %>%
+  group_by(Faculty...School,SEC_SES_YR) %>% 
+  summarize(TotalEnrolment = sum(Total_Enrolment)) %>% 
+  rename(Year = SEC_SES_YR,FacultySchool = Faculty...School) %>% 
+  arrange(-FacultySchool) -> a 
+a
+#The NA values mean that the course-department code does not have a mapping in faculty/school
+
+ggplot(a,aes(x=Year,y=TotalEnrolment/1000,color=FacultySchool))+
+  geom_line(size=1) +
+  geom_point() +
+  labs(y = "Total Number of Course Registration (in 000s)") +
+  ggtitle("Total Number of Course Registration on Faculty Level") +
+  theme(legend.title = element_blank(),
+        legend.text = element_text(color = "black",size = 6),
+        legend.position = "bottom")
+
+#Due to the different Y-values for different faculties and schools, this plot does not show the trend very well, so I broke the plot into each faculty/school level.
+
+```
+
+
+```{r}
+for (i in Faculty_or_School_2) {
+  print(
+    a %>% 
+      filter(FacultySchool ==i) %>% 
+      mutate(percentage_change = (TotalEnrolment-lag(TotalEnrolment))/lag(TotalEnrolment))
+      )
+      }
+
+```
+
+
+```{r}
+for (i in Faculty_or_School_2) {
+  b <- a %>% filter(FacultySchool ==i)
+  print(ggplot(b,aes(x=Year,y=TotalEnrolment),fill=FacultySchool)+
+        geom_line(size=1) +
+        geom_point() +
+        # geom_text(aes(label = round(TotalEnrolment, 1)),
+        #           show.legend = FALSE)+
+          
+        geom_text(aes(label = round(TotalEnrolment, 1)),
+            vjust = 0, hjust = 1, angle = 0,position = position_dodge(width = 1),
+            show.legend = FALSE)+
+        theme_clean()+
+        labs(y = "Total Number of Course Registration") +
+        ggtitle("Total Registration Number Trend from 2013-2018",subtitle = i) +
+        scale_fill_discrete(guide = guide_legend()) + theme(legend.position = "bottom")+
+        scale_x_continuous("Year",labels = b$Year, breaks = b$Year)
+        # theme(plot.title = element_text(hjust = 0.5))+
+      )
+  #ggsave(paste0(i,".png"))
+      }
+
+```

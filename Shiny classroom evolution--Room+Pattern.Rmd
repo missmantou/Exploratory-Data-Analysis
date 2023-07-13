@@ -1,0 +1,427 @@
+---
+title: "Shiny"
+output: html_document
+---
+
+```{r}
+#### Initiate the work flow by loading and installing required packages, and reseting working directory.
+# list of required packages
+required.packages <- c("tidyverse",
+                       "ggplot2",
+                       "shiny",
+                       "shinythemes",
+                       "shinyWidgets",
+                       "plotly",
+                        'dplyr',
+                       'scales',
+                       'plotrix',
+                       'ggrepel',
+                       'forcats',
+                       'viridis',
+                       'lubridate',
+                       'ggExtra',
+                       'tidyr',
+                       'ggthemes')
+
+# install then load the packages that are not installed yet, or load packages that are already installd
+for (i in required.packages){
+  if (!(i %in% rownames(installed.packages()))){
+    install.packages(i)
+    library(i, character.only = T)
+  } else {
+    library(i, character.only = T)
+  }
+}
+workingDirectory <- getwd()
+setwd(workingDirectory)
+```
+
+
+```{r}
+sectionData <- readRDS("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/03_WIP/Eden & Heni/Data/sectionData.rds")
+SectionDataWinter <- sectionData %>% 
+  filter(SEC_SES_CD =="W")
+outRoomData <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/03_WIP/Eden & Heni/Data/outRoomData_all_room_data.csv")
+DepttoFaculty <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/03_WIP/Eden & Heni/Data/dptToFaculty.csv")
+
+#Add column: course study hours (weekly)
+SectionDataWinter$Course_Length_Weekly<-SectionDataWinter$duration/3600*(SectionDataWinter$U+SectionDataWinter$M+SectionDataWinter$T+SectionDataWinter$W+SectionDataWinter$R+SectionDataWinter$F+SectionDataWinter$S)
+
+#The complete building code list 
+building_list <- as.vector(unique(outRoomData$building))
+
+#Department list
+dept_list <-unique(SectionDataWinter$CRS_DPT_CD)
+
+#The meeting type list 
+Meeting_type_all <- c("LEC","TUT","LAB","SEM","Others")
+Meeting_type <- c("LEC","TUT","LAB","SEM")
+Meeting_type_Others <- as.data.frame(unique(SectionDataWinter$MEETING_TYPE)) %>% 
+  filter(!unique(SectionDataWinter$MEETING_TYPE) %in% c("LEC","TUT","LAB","SEM")) %>% 
+  drop_na()
+
+Meeting_type_Others <- as.vector(Meeting_type_Others$`unique(SectionDataWinter$MEETING_TYPE)`)
+#class(Meeting_type_Others)
+
+#as.vector(Meeting_type)
+#Meeting_type_others <- sectionData %>% 
+#   filter(!MEETING_TYPE %in% c("LEC","TUT","LAB","SEM")) %>% 
+#   pull(MEETING_TYPE) %>% 
+#   unique()
+
+#The course credit list
+course_credit<- unique(SectionDataWinter$CRS_CREDIT)
+
+#The course study hours (weekly) list
+weekly_hour<- unique(SectionDataWinter$Course_Length_Weekly)
+
+#The year list
+year<- sort(unique(SectionDataWinter$SEC_SES_YR))
+
+#Remove the building and room that are not GTS or RTS
+SectionDataWinter2 <- SectionDataWinter %>% 
+  filter(BUILDING %in% building_list)
+
+```
+
+
+```{r, warning=FALSE}
+
+# Define UI for application that plots features of movies
+ui <- fluidPage(
+  # themeSelector(),
+  theme = shinytheme('paper'),
+  # App title
+  # titlePanel("Trend Plots"),
+  
+   tabsetPanel(
+    tabPanel(
+      title = "Trend Plots",
+      fluid = TRUE,
+      sidebarLayout(
+    # Inputs
+      sidebarPanel(
+
+      h5("Please select the department:"),      # Third level header: Plotting
+      pickerInput(inputId = "dept",
+                  label = "Select Departments:",
+                  choices = dept_list,
+                  selected = dept_list,
+                  options = list('actions-box' = TRUE),
+                  multiple = T),
+
+      h5("Please select the meeting type: "),    # Third level header: Subsetting
+      # Select which types of movies to plot
+      pickerInput(inputId = "meetingtype",
+                  label = "Select Meeting Type:",
+                  choices = Meeting_type_all,
+                  selected =  Meeting_type_all,
+                  options = list('actions-box' = TRUE),
+                  multiple = T)
+      ),
+      #Output
+    mainPanel(
+                h5(textOutput(outputId = "Deptselection")),
+                plotlyOutput(outputId = "Roomsizeusage"),
+                plotlyOutput(outputId = "Numofsections"),
+                plotlyOutput(outputId = "AverageEnrolment")
+                ))),
+
+
+  # Sidebar layout with a input and output definitions
+    tabPanel(
+      title = "Building Usage",
+      fluid = TRUE,
+      sidebarLayout(
+        #Input
+        sidebarPanel(
+      h5("Please select the department:"),      # Third level header: Plotting
+      pickerInput(inputId = "dept2",
+                  label = "Select Departments:",
+                  choices = dept_list,
+                  selected =dept_list,
+                  options = list('actions-box' = TRUE),
+                  multiple = T),
+      h5("Please select the Top n most used building(s):"),
+      sliderInput(inputId = "top_n",
+                  label="Select top n most used building:",
+                  min=1,
+                  max=10,
+                  value=3,
+                  step=1)
+      ),
+      #Output
+      mainPanel(
+              plotlyOutput(outputId = "Buildingusage"),
+              DT::dataTableOutput(outputId = "buildingusagetable")))
+      ),
+    # Sidebar layout with a input and output definitions
+    tabPanel(
+      title = "Time Pattern",
+      fluid = TRUE,
+      sidebarLayout(
+        #Input
+        sidebarPanel(
+      h5("Please select the department:"),      # Third level header: Plotting
+      pickerInput(inputId = "dept3", 
+                  label = "Select Departments:",
+                  choices = dept_list, 
+                  selected = dept_list,
+                  options = list('actions-box' = TRUE),
+                  multiple = T),
+      h5("Please select the year:"),
+      checkboxGroupInput(inputId = "Year1",
+                  label="Select the year:",
+                  choices=year,
+                  selected = year),
+      h5("Please select the meeting type: "),    # Third level header: Subsetting
+      # Select which types of movies to plot
+      pickerInput(inputId = "meetingtype1", 
+                  label = "Select Meeting Type:",
+                  choices = Meeting_type_all,
+                  selected =  Meeting_type_all,
+                  options = list('actions-box' = TRUE),
+                  multiple = T),
+      h5("Please select the course credit: "),    # Third level header: Subsetting
+      # Select which types of movies to plot
+      pickerInput(inputId = "coursecredit", 
+                  label = "Select Course Credit:",
+                  choices = as.vector(course_credit),
+                  selected = as.vector(course_credit),
+                  options = list('actions-box' = TRUE),
+                  multiple = T),
+      h5("Please select the weekly study hour: "),    # Third level header: Subsetting
+      # Select which types of movies to plot
+      pickerInput(inputId = "weeklystudyhour", 
+                  label = "Select Weekly Study Hour:",
+                  choices = as.vector(weekly_hour),
+                  selected = as.vector(weekly_hour),
+                  options = list('actions-box' = TRUE),
+                  multiple = T)
+      ),
+      #Output
+      mainPanel(
+              plotlyOutput(outputId = "Timepattern")))
+    ),
+    tabPanel(
+      title = "Seat Utilization",
+      fluid = TRUE,
+      sidebarLayout(
+        #Input
+        sidebarPanel(
+      h5("Please select the year:"),
+      checkboxGroupInput(inputId = "year2",
+                  label="Select the year:",
+                  choices=year,
+                  selected = year)
+      ),
+      #Output
+      mainPanel(
+              plotlyOutput(outputId = "seatUtil")))
+      )
+    ))
+
+# Define server function required to create the scatterplot
+server <- function(input, output) {
+
+#########################################################################
+#ROOM GROUP SIZE USAGE PLOT
+######################################################################### 
+  # Create reactive data set for room group usage plot
+  Roomsizeusage <- reactive({
+    req(input$dept,input$meetingtype) # ensure availablity of value before proceeding
+  SectionDataWinter %>%
+  filter(Total_Enrolment>0) %>% 
+  filter(if (input$meetingtype =="Others") MEETING_TYPE %in% Meeting_type_Others else MEETING_TYPE %in% input$meetingtype) %>% 
+  filter(isGTS==1) %>%
+  filter(CRS_DPT_CD %in% input$dept) %>% 
+  filter(inStandardTimetable == 1) %>% 
+  select(SEC_SES_YR,Section, CRS_DPT_CD,roomGroup,DAYSMET,duration,M,T,W,R,F,weekCount) %>% 
+  mutate(duration = duration/3600) %>% 
+  mutate(M = case_when(M ==1 ~ duration,
+                       M ==0 ~ 0)) %>% 
+  mutate(T = case_when(T ==1 ~ duration,
+                       T ==0 ~ 0)) %>% 
+  mutate(W = case_when(W ==1 ~ duration,
+                       W ==0 ~ 0)) %>% 
+  mutate(R = case_when(R ==1 ~ duration,
+                       R ==0 ~ 0)) %>% 
+  mutate(F = case_when(F ==1 ~ duration,
+                       F ==0 ~ 0)) %>% 
+  mutate(sessionhours = (M+T+W+R+F)*weekCount) %>% 
+  dplyr::group_by(SEC_SES_YR,roomGroup) %>% 
+  dplyr::summarise(total_session_hours = sum(sessionhours)) %>% 
+  drop_na()
+  })
+  
+  output$Roomsizeusage <- renderPlotly({
+      ggplotly(
+        ggplot(Roomsizeusage(), aes(x=SEC_SES_YR, y = total_session_hours,color=roomGroup)) + 
+        geom_line() + 
+        ggtitle ("What rooms sizes are department using more over time?") +
+        ylab ("Room usage based on total number of hours occupied (hrs)") +
+        xlab ("Year") +
+        scale_color_discrete(name="Room Group")
+)
+  })
+
+#########################################################################
+#THE NUMBER OF OFFERED SECTIONS
+#########################################################################  
+  Numofsections <- reactive ({
+  req(input$dept,input$meetingtype) # ensure availablity of value before proceeding
+    SectionDataWinter %>%
+   dplyr::filter(CRS_DPT_CD %in% input$dept,if (input$meetingtype =="Others") MEETING_TYPE %in% Meeting_type_Others else MEETING_TYPE %in% input$meetingtype) %>% 
+   dplyr::group_by(SEC_SES_YR, MEETING_TYPE) %>% 
+   dplyr::summarize(Numberofsections = n_distinct(Section1)) %>% 
+   dplyr::rename(Year = SEC_SES_YR) 
+  })
+  
+   output$Numofsections <- renderPlotly({
+      ggplotly(
+        ggplot(Numofsections(), aes(x=Year, y = Numberofsections, color = MEETING_TYPE)) +
+        geom_line(size=1) +
+        ylab ("Total Number of Sections") +
+        xlab ("Year") +
+        scale_color_discrete(name=" <sub>Meeting</sub> <sub>Types</sub>") +
+        ggtitle("Number Of Sections Department(s) Offered From 2013 - 2018")
+        
+      ) 
+  })
+
+#########################################################################
+#THE AVERAGE NUMBER OF ENROLLMENT 
+#########################################################################  
+     
+  Averageenrolment <- reactive ({ 
+  req(input$dept,input$meetingtype) # ensure availablity of value before proceeding
+  SectionDataWinter %>%
+   dplyr::filter(CRS_DPT_CD %in% input$dept,if (input$meetingtype =="Others") MEETING_TYPE %in% Meeting_type_Others else MEETING_TYPE %in% input$meetingtype) %>% 
+   dplyr::group_by(SEC_SES_YR, MEETING_TYPE) %>% 
+   dplyr::summarize(AverageEnrolment = mean(Total_Enrolment,na.rm=TRUE)) %>% 
+   dplyr::rename(Year = SEC_SES_YR)
+  })
+  
+  output$AverageEnrolment <- renderPlotly({
+      ggplotly(
+        ggplot(Averageenrolment(), aes(x=Year, y = AverageEnrolment, color = MEETING_TYPE)) +
+        geom_line(size=1) +
+        ylab ("Average Number of Enrolment") +
+        xlab ("Year") +
+        scale_color_discrete(name="<sub>Meeting</sub> <sub>Types</sub>") +
+        ggtitle("Average Enrolment Number Per Meeting Type from 2013 - 2018")
+      )
+  })
+
+  #output$Deptselection <- renderText(as.character(DepttoFaculty$Subject.Title[which(DepttoFaculty$Subject.Code %in% input$dept)]))
+  #Create the plot for evolution of room group usage
+
+#########################################################################
+#BUILDING USAGE
+#########################################################################
+  #Create reactive data set for Building usage plot
+  Buildingusage <- reactive({
+    req(input$dept2,input$top_n) # ensure availablity of value before proceeding
+  SectionDataWinter2 %>%
+  dplyr::filter(CRS_DPT_CD %in% input$dept2) %>% 
+  dplyr::select(CRS_DPT_CD,BUILDING,SEC_SES_YR) %>% 
+  dplyr::group_by (SEC_SES_YR,BUILDING) %>% 
+  dplyr::summarize(Building_count = n()) %>% 
+  dplyr::arrange(SEC_SES_YR,-Building_count) %>%
+  dplyr::group_by(BUILDING = factor(c(BUILDING[1:input$top_n], rep("Others", n() - input$top_n)),
+                            levels = c(BUILDING[1:input$top_n], "Others"))) %>%
+  dplyr::select(SEC_SES_YR,BUILDING,Building_count) %>% 
+  dplyr::group_by(SEC_SES_YR,BUILDING) %>% 
+  dplyr::summarize(Building_count = sum(Building_count)) %>% 
+  dplyr::arrange(SEC_SES_YR,-Building_count)
+  })
+  
+  Buildingusage.all <- reactive({
+    rbind(as.data.frame(Buildingusage()), cbind(expand.grid(SEC_SES_YR=levels(as.factor(as.data.frame(Buildingusage())$SEC_SES_YR)), BUILDING=levels(as.factor(as.data.frame(Buildingusage())$BUILDING))), Building_count=NA))
+  })
+  
+
+  #render reactive plotly plot
+  output$Buildingusage <- renderPlotly({
+  ggplotly (
+        ggplot(Buildingusage.all(), aes(x=SEC_SES_YR, y = Building_count,fill=BUILDING)) +
+        geom_bar(position = "dodge",stat="identity" ) +
+        ylab ("Number of times the building is used")  +
+        xlab ("Year")) 
+  })
+
+   #Create reactive data table
+   output$buildingusagetable <- DT::renderDataTable({Buildingusage.all()})
+   
+   
+#########################################################################
+#SEAT UTILIZATION 
+######################################################################### 
+  seatUtilData <- reactive({
+    req(input$year2) # ensure availablity of value before proceeding
+    SectionDataWinter %>%
+         filter(isGTS == TRUE, SEC_SES_YR %in% input$year2) %>% 
+         dplyr::group_by(CRS_DPT_CD) %>% 
+         dplyr::summarise(GTS=median(seatUtilization)) %>%
+         full_join(sectionData %>% 
+                     filter(isGTS == FALSE, SEC_SES_YR %in% input$year2) %>% 
+                     dplyr::group_by(CRS_DPT_CD) %>% 
+                     dplyr::summarise(RTS=median(seatUtilization)), 
+                   by = c("CRS_DPT_CD" = "CRS_DPT_CD")) %>% 
+           drop_na()
+  })
+  output$seatUtil <- renderPlotly({
+    ggplotly(
+      ggplot(seatUtilData(),
+       aes(GTS, RTS)) +
+        geom_point(aes(text=CRS_DPT_CD)) +
+        xlim(0,1) +
+        ylim(0,1) +
+        ggtitle("RTS vs GTS Seat Utilization"))
+        
+  })
+   
+   
+#########################################################################
+#TIME PATTERN
+######################################################################### 
+   
+ # Create reactive data set for time pattern plot
+  Timepattern <- reactive({
+    req(input$dept3,input$meetingtype1,input$Year1,input$weeklystudyhour,input$coursecredit) 
+    # ensure availablity of value before proceeding
+    
+    SectionDataWinter %>%
+       dplyr::filter(CRS_DPT_CD%in%input$dept3,
+             Course_Length_Weekly%in%input$weeklystudyhour,
+             year%in%input$Year1,
+             if (input$meetingtype1 =="Others") MEETING_TYPE %in% Meeting_type_Others else MEETING_TYPE %in% input$meetingtype1,
+             CRS_CREDIT%in%input$coursecredit) %>%
+  # dplyr::select(DAYSMET, duration,SEC_SES_YR,CRS_DPT_CD,course_length_weekly,weekCount) %>% 
+   dplyr::group_by(DAYSMET, duration,SEC_SES_YR,CRS_DPT_CD,Course_Length_Weekly,CRS_CREDIT) %>% 
+   dplyr::summarize(n=n_distinct(Section)) %>% 
+   dplyr::ungroup() %>%  
+  dplyr:: mutate(duration=duration/3600) %>% 
+  mutate(duration = factor(duration))
+  })
+  #Create the plot for evolution of room group usage
+  output$Timepattern <- renderPlotly({
+      ggplotly(
+       ggplot(Timepattern(),aes(DAYSMET,duration,fill=n))+
+        geom_tile(color= "white",size=0.1) + 
+        scale_fill_viridis(name="Hrly Temps C",option ="C")+ 
+        ylab("Section duration (number of hours)") +  
+        xlab("Day pattern") +
+        guides(fill=guide_colorbar(title="Count:"))+ 
+        #facet_grid(patterndt$SEC_SES_YR~.)+ 
+        theme_minimal(base_size = 8))
+  }) 
+}
+# Create Shiny app object
+shinyApp(ui = ui, server = server)
+```
+
+```{r}
+
+```
+

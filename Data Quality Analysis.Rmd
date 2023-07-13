@@ -1,0 +1,107 @@
+---
+title: "Data Quality Analysis"
+author: "Eden ye"
+date: "8/20/2019"
+output: html_document
+---
+
+The purpose of this analysis is to show the data difference between the all sections data and student registration data.
+The number of unique sections between these 2 datasets should match theoretically, but we found discrepancies that could not be explained.
+
+```{r setup, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(viridis)
+library(purrr)
+library(scales)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(gridExtra)
+library(ggthemes)
+library(markdown)
+library(rmarkdown)
+library(ggplot2)
+library(ggforce)
+library(dplyr)
+library(fpp2)
+library(tidyr)
+#install.packages('stringr')
+library(stringr)
+library(reshape2)
+library(plotly)
+library(plotrix)
+library(RColorBrewer)
+library(splitstackshape)
+library(data.table)
+```
+
+
+```{r}
+#original section data
+OriginalData <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/allSections2013_2018COE.csv")
+
+OriginalData %>% 
+  filter(ADMIN_CAMPUS_CD == "UBC") %>% 
+  filter(Total_Enrolment>0) %>%
+  filter( SEC_SES == "2018W") %>%
+  summarise(n_distinct(Section1))
+
+#13387 distinct sections with total enrolment > 0
+```
+
+```{r}
+#student registration data - Please note that this is the 1st registration data we received which only includes 2018W data
+student_registration_winter <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/student_registration_winter.csv")
+student_registration_winter %>% 
+  filter(SESSION_CODE =="W") %>%
+  summarise(n_distinct(SectionID))
+#originally, there are 15668 distinct sections 
+
+#Let's look at the final picture of the section enrolment after add/drop activities 
+add_drop_behavior <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/add drop behavior - Winter NEW.csv")
+
+add_drop_behavior %>% 
+  filter(final_status %in% c("A","F")) %>% 
+  summarise(n_distinct(SectionID))
+#The final picture, there are 13409 distinct sections
+```
+
+
+```{r}
+#Let's see how many sections actually match between all sections data and student registration data
+OriginalData %>% 
+  filter(ADMIN_CAMPUS_CD == "UBC",
+         Total_Enrolment>0,
+         SEC_SES == "2018W") %>% 
+  select(Section1) %>% 
+  unique() %>% 
+  arrange(Section1)-> Original_Section
+
+add_drop_behavior %>% 
+  filter(final_status %in% c("A","F")) %>% 
+  select(SectionID) %>% 
+  unique() %>% 
+  arrange(SectionID)-> student_Section
+
+Original_Section %>% 
+  inner_join(student_Section,by=c("Section1"="SectionID")) %>% 
+#only 11849 sections match between these 2 datasets
+
+```
+
+
+
+```{r}
+#Sahir's cleaned section data
+SectionData <- readRDS("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/sectionData.rds")
+#Winter Data
+SectionDataWinter <- SectionData %>% 
+  filter(SEC_SES_CD =="W")
+#Sahir's processed section data, this data only includes the sections with room and building info
+SectionDataWinter %>% 
+  filter(SEC_SES =="2018W") %>% 
+  summarise(n_distinct(Section))
+#There are 10604 distinct sections with valid room info
+```
+

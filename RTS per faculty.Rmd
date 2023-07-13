@@ -1,0 +1,619 @@
+---
+title: "Utilization Based on Tier 1 Access"
+author: "Eden ye"
+date: "8/20/2019"
+output: html_document
+---
+
+```{r}
+library(knitr)
+library(tidyverse)
+library(viridis)
+library(purrr)
+library(scales)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(gridExtra)
+library(ggthemes)
+library(markdown)
+library(rmarkdown)
+library(ggplot2)
+library(ggforce)
+library(dplyr)
+library(fpp2)
+library(tidyr)
+#install.packages('stringr')
+library(stringr)
+library(reshape2)
+library(plotly)
+library(plotrix)
+library(RColorBrewer)
+library(splitstackshape)
+library(data.table)
+
+```
+
+
+```{r}
+#Sahir's cleaned section data
+SectionData <- readRDS("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/sectionData.rds")
+
+#Winter Data
+SectionDataWinter <- SectionData %>% 
+  filter(SEC_SES_CD =="W")
+
+#New dept to faculty data
+Dept_to_Faculty <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/Course Codes to Faculty-08.02.19.csv")
+
+#Master Room Data
+Room <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/masterClassroom_comnpleteMatrix.csv")
+
+#All room data from facilities planning website
+allroomdata <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/outRoomData_all_room_data.csv")
+
+#Atalas processed dataset for room analysis
+atlas <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/sectionData_ready_for_room_analysis.csv")
+```
+
+
+Room utilization on Faculty Level
+By Tier 1 access  (partial information and only “current” tier 1 designation)
+Single faculty (broken out by room size group)
+Multiple faculties(broken out by room size group)
+“Equal share by faculty”
+
+```{r}
+#get all the department columns 
+which(colnames(Room)=="S..AANB.V" )->a
+which(colnames(Room)=="S..ZOOL.V" )->b
+which(colnames(Room)=="Name_left" )->c
+which(colnames(Room)=="S..FCOR.V.1"）->d
+
+col <- c(c,a:b,d )
+Room[,col]->room_dept
+
+#Get the 4 letters course dept code
+colnames(room_dept) <- substr(colnames(room_dept),4,7)
+
+setnames(room_dept, old = c('e_le',"STS.","OHS.","LFS.","LAW.","GPP.","GEM.","FRE.","FNH.","DES.","BA.V","GRS.","HPB.","KIN.","LWS."), new = c('Name',"STS","OHS","LFS","LAW","GPP","GEM","FRE","FNH","DES","BA","GRS","HPB","KIN","LWS"))
+
+room_dept %>% 
+  drop_na() ->room_dept
+
+#Convert the name column to row names
+room_dept$Name<-as.character(room_dept$Name)
+rownames(room_dept) <- room_dept$Name
+room_dept <- room_dept[,-1]
+
+#Transpose the room department table
+room_dept<-room_dept %>% 
+   rownames_to_column %>% 
+   gather(var, value, -rowname) %>% 
+   spread(rowname, value) 
+
+# Aggregate the same faculty/school together
+room_dept %>% 
+  left_join(Dept_to_Faculty %>% select(`Subject.Code`,`Faculty...School`), by = c("var" = "Subject.Code")) %>% 
+  drop_na() %>% 
+  select(`Faculty...School`,everything(),-`var`) %>% 
+  # mutate(`Faculty...School` = ifelse(is.na(`Faculty...School`),"Others",as.character(`Faculty...School`))) %>% 
+  group_by(`Faculty...School`) %>% 
+  summarise_each(funs(sum)) -> faculty_room
+
+
+#Convert the name column to row names
+faculty_room$`Faculty...School`<-as.character(faculty_room$`Faculty...School`)
+faculty_room <- as.data.frame(faculty_room)
+rownames(faculty_room) <- faculty_room$`Faculty...School`
+faculty_room <- faculty_room[,-1]
+
+#Transpose faculty_room table to room_faculty
+room_faculty<-faculty_room %>% 
+   rownames_to_column %>% 
+   gather(var, value, -rowname) %>% 
+   spread(rowname, value) 
+
+#Count how many faculties have Tier1 access to one room
+room_faculty <-room_faculty %>% 
+  mutate(count=rowSums(.[2:14]!=0))
+
+#Join the all room data to get the capcity column 
+room_faculty <-room_faculty %>% 
+  left_join(allroomdata %>% select(`isGTS`,`Capacity`,`Name`),by=c("var" = "Name" )) %>% 
+  mutate(`var` = case_when(
+      `var` == "ANGU 037" ~ "ANGU 37",
+      `var` == "ANGU 038" ~ "ANGU 38",
+      `var` == "ANGU 039" ~ "ANGU 39",
+      `var` == "ANGU 039" ~ "ANGU 39",
+      `var` == "ICCS 005" ~ "ICCS 5",
+      `var` == "ICCS 008" ~ "ICCS 8",
+      `var` == "ICCS 011" ~ "ICCS 11",
+      `var` == "ICCS 014" ~ "ICCS 14",
+      `var` == "ICCS 015" ~ "ICCS 15",
+      `var` == "BIOL 0505" ~ "BIOL 505",
+      `var` == "BIOL 0509" ~ "BIOL 509",
+      TRUE ~ `var`))
+
+#write.csv(room_faculty,"room faculty.csv")
+
+```
+
+```{r}
+#Separate the data based on room capacity into 4 sets
+room_faculty %>% 
+  filter(Capacity >=1 & Capacity <100) ->room_group1
+
+room_faculty %>% 
+  filter(Capacity >=100 & Capacity <200) ->room_group2
+
+room_faculty %>% 
+  filter(Capacity >=200 & Capacity <300)->room_group3
+
+room_faculty %>% 
+  filter(Capacity >=300)->room_group4
+
+#write.csv(room_faculty,"room faculty.csv")
+
+```
+
+
+```{r}
+#For each room group set, separate the data based on if multiple faculties have tier 1 access to the same room
+room_group1 %>% 
+  filter(count==1) ->room_group1_single
+room_group1 %>% 
+  filter(count >1) -> room_group1_multiple
+room_group1 %>% 
+  filter(count ==0) -> room_group1_notier1
+
+room_group2 %>% 
+  filter(count==1) ->room_group2_single
+room_group2 %>% 
+  filter(count >1) -> room_group2_multiple
+room_group2 %>% 
+  filter(count ==0) -> room_group2_notier1
+
+room_group3 %>% 
+  filter(count==1) ->room_group3_single
+room_group3 %>% 
+  filter(count >1) -> room_group3_multiple
+room_group3 %>% 
+  filter(count ==0) -> room_group3_notier1
+
+room_group4 %>% 
+  filter(count==1) ->room_group4_single
+room_group4 %>% 
+  filter(count >1) -> room_group4_multiple
+room_group4 %>% 
+  filter(count ==0) -> room_group4_notier1
+
+```
+
+```{r}
+room_group1_single %>% 
+  mutate(faculty = colnames(room_group1_single[apply(room_group1_single[,2:(ncol(room_group1_single)-3)], 1, function(x)which(x>0))+1]) ) %>% 
+  mutate(faculty =gsub("\\..*","",faculty)) ->room_group1_single
+  
+room_group2_single %>% 
+  mutate(faculty = colnames(room_group2_single[apply(room_group2_single[,2:(ncol(room_group2_single)-3)], 1, function(x)which(x>0))+1]) ) %>% 
+  mutate(faculty =gsub("\\..*","",faculty)) ->room_group2_single
+
+room_group3_single %>% 
+  mutate(faculty = colnames(room_group3_single[apply(room_group3_single[,2:(ncol(room_group3_single)-3)], 1, function(x)which(x>0))+1]) ) %>% 
+  mutate(faculty =gsub("\\..*","",faculty)) ->room_group3_single
+
+room_group4_single %>% 
+  mutate(faculty = colnames(room_group4_single[apply(room_group4_single[,2:(ncol(room_group4_single)-3)], 1, function(x)which(x>0))+1]) ) %>% 
+  mutate(faculty =gsub("\\..*","",faculty)) ->room_group4_single
+
+```
+
+```{r}
+
+##########################################################
+#Data Preparation for room usage + utilization analysis
+##########################################################
+
+#Atlas claned section data for room analysis
+
+atlas %>% 
+  mutate(DAYSMET = as.character(DAYSMET)) %>% 
+  filter(nchar(DAYSMET)>1) ->TEST
+atlas %>% 
+  mutate(DAYSMET = as.character(DAYSMET)) %>% 
+  filter(nchar(DAYSMET)<=1) -> TEST2
+
+
+#there are 52 NA values in DAYSMET column
+# table(is.na(atlas$DAYSMET))
+
+TEST %>% 
+  rowwise() %>% 
+  mutate(DAYSMET = strsplit(DAYSMET,split='')) %>% 
+  mutate(DAYSMET = paste0(DAYSMET, collapse=",")) -> TEST
+  
+separate_rows(TEST,DAYSMET,sep=",") -> TEST
+
+TEST %>% 
+  full_join(TEST2) %>% 
+  arrange(X) ->TEST3
+
+TEST3$weekCount[TEST3$weekCount >= 31] <- 24
+
+TEST3$START_TIME <-hms(TEST3$START_TIME)
+TEST3$END_TIME <- hms(TEST3$END_TIME)
+
+#Convert the start time and end time to be within standard time table
+TEST3$END_TIME[TEST3$DAYSMET == "T" & TEST3$END_TIME >= hms("18:30:00")] <- hms("18:30:00")
+TEST3$END_TIME[TEST3$DAYSMET == "R" & TEST3$END_TIME >= hms("18:30:00")] <- hms("18:30:00")
+TEST3$END_TIME[TEST3$DAYSMET == "M" & TEST3$END_TIME >= hms("18:00:00")] <- hms("18:00:00")
+TEST3$END_TIME[TEST3$DAYSMET == "W" & TEST3$END_TIME >= hms("18:00:00")] <- hms("18:00:00")
+TEST3$END_TIME[TEST3$DAYSMET == "F" & TEST3$END_TIME >= hms("18:00:00")] <- hms("18:00:00")
+TEST3$START_TIME[TEST3$START_TIME<= hms("8:00:00")] <- hms("8:00:00")
+
+#Redo the TRUE/FALSE table
+TEST3 %>% 
+  mutate(`U` = str_detect(DAYSMET, "U"),
+         `M` = str_detect(DAYSMET, "M"),
+         `T` = str_detect(DAYSMET, "T"),
+         `W` = str_detect(DAYSMET, "W"),
+         `R` = str_detect(DAYSMET, "R"),
+         `F` = str_detect(DAYSMET, "F"),
+         `S` = str_detect(DAYSMET, "S")) ->TEST3
+
+```
+
+```{r}
+#Calculate faculty used hours in each room for 2018W
+TEST3 %>% 
+  left_join(Dept_to_Faculty %>% select(Subject.Code, `Faculty...School`),by=c("CRS_DPT_CD" = "Subject.Code" )) %>% 
+  filter(Total_Enrolment>0) %>%
+  filter(SEC_SES_CD == "W") %>% 
+  filter(SEC_SES == "2018W") %>% 
+  # filter(roomGroup !="Unidentified") %>% 
+  # filter(isGTS==0) %>%
+  filter(inStandardTimetable== 1) %>% 
+  mutate(START_DATE = as.Date(START_DATE, format="%Y-%m-%d"),
+         END_DATE=as.Date(END_DATE, format="%Y-%m-%d"),
+         duration_new = as.numeric(END_TIME - START_TIME)) %>% 
+  filter(START_DATE>="2013-09-03" & END_DATE<="2013-11-29"|
+          START_DATE>="2013-09-03" & END_DATE<="2014-04-08"| 
+           START_DATE>="2014-01-02" & END_DATE<="2014-04-08"|
+           START_DATE>="2014-09-02" & END_DATE<="2014-11-28"|
+           START_DATE>="2014-09-02" & END_DATE<="2015-04-10"|
+           START_DATE>="2015-01-06" & END_DATE<="2015-04-10"|
+           START_DATE>="2015-09-08" & END_DATE<="2015-12-04"|
+           START_DATE>="2015-09-08" & END_DATE<="2016-04-08"|
+           START_DATE>="2016-01-05" & END_DATE<="2016-04-08"|
+           START_DATE>="2016-09-06" & END_DATE<="2016-12-02"|
+           START_DATE>="2016-09-06" & END_DATE<="2017-04-06"|
+           START_DATE>="2017-01-04" & END_DATE<="2017-04-06"|
+           START_DATE>="2017-09-05" & END_DATE<="2017-12-01"|
+           START_DATE>="2017-09-05" & END_DATE<="2018-04-06"|
+           START_DATE>="2018-01-03" & END_DATE<="2018-04-06"|
+           START_DATE>="2018-09-04" & END_DATE<="2018-11-30"|
+           START_DATE>="2018-09-04" & END_DATE<="2019-04-06"|
+           START_DATE>="2019-01-02" & END_DATE<="2019-04-06") %>% 
+  select(SEC_SES_YR,exactRoom,Faculty...School.y,DAYSMET,duration_new,M,`T`,W,R,`F`,weekCount) %>% 
+  mutate(duration_new = duration_new/3600) %>% 
+  mutate(M = case_when(M ==1 ~duration_new,
+                       M ==0 ~ 0)) %>% 
+  mutate(`T` = case_when(`T` ==1 ~ duration_new,
+                       `T` ==0 ~ 0)) %>% 
+  mutate(W = case_when(W ==1 ~ duration_new,
+                       W ==0 ~ 0)) %>% 
+  mutate(R = case_when(R ==1 ~ duration_new,
+                       R ==0 ~ 0)) %>% 
+  mutate(`F` = case_when(`F` ==1 ~ duration_new,
+                       `F` ==0 ~ 0)) %>% 
+  mutate(sessionhours = (M+`T`+W+R+`F`)*weekCount) %>% 
+  dplyr::group_by(SEC_SES_YR,exactRoom, Faculty...School.y) %>% 
+  dplyr::summarise(total_session_hours = sum(sessionhours,na.rm=TRUE)) %>% 
+  # mutate(year_faculty=paste0(SEC_SES_YR,"-",Faculty...School.y)) %>% 
+  drop_na() ->faculty_room_usage
+
+
+```
+
+```{r}
+#Utilization rate faculty level by Tier 1 access - Single faculty
+room_group1_single %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','faculty' = "Faculty...School.y")) %>% 
+  select(`var`,isGTS,faculty,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(faculty = ifelse(faculty == "Peter A","Peter A. Allard School of Law",faculty)) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/1244.4) %>% 
+  group_by(isGTS, faculty) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS == "RTS") %>% 
+  mutate(roomgroup = "1-100")->room_group1_single
+
+  
+room_group2_single %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','faculty' = "Faculty...School.y")) %>% 
+  select(`var`,isGTS,faculty,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(faculty = ifelse(faculty == "Peter A","Peter A. Allard School of Law",faculty)) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/1244.4) %>% 
+  group_by(isGTS,faculty) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS == "RTS") %>% 
+  mutate(roomgroup = "101-200")-> room_group2_single
+
+
+room_group3_single %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','faculty' = "Faculty...School.y")) %>% 
+  select(`var`,isGTS,faculty,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(faculty = ifelse(faculty == "Peter A","Peter A. Allard School of Law",faculty)) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/1244.4) %>% 
+  group_by(isGTS,faculty) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS == "RTS") %>% 
+  mutate(roomgroup = "201-300")->room_group3_single
+
+
+room_group4_single %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','faculty' = "Faculty...School.y")) %>% 
+  select(`var`,isGTS,faculty,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(faculty = ifelse(faculty == "Peter A","Peter A. Allard School of Law",faculty)) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/1244.4) %>% 
+  group_by(isGTS,faculty) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS == "RTS") %>% 
+  mutate(roomgroup = "over 300")-> room_group4_single
+
+
+Single<- rbind(room_group1_single, room_group2_single,room_group3_single,room_group4_single)
+
+Single %>% 
+  mutate(short_faculty = case_when(faculty =="Faculty of Applied Science"~"App. Sci.",
+                                   faculty =="Faculty of Arts"~"Arts",
+                                   faculty =="Faculty of Dentistry"~"Dentistry",
+                                   faculty =="Faculty of Education"~"Education",
+                                   faculty =="Faculty of Forestry"~"Forestry",
+                                   faculty =="Faculty of Land and Food Systems"~"Land and Food",
+                                   faculty =="Faculty of Medicine"~"Medicine",
+                                   faculty =="Faculty of Pharmaceutical Sciences"~"Pharm. Sci.",
+                                   faculty =="Faculty of Science"~"Science",
+                                   faculty =="Sauder School of Business"~"Sauder",
+                                   faculty =="Peter A. Allard School of Law"~"Law School",
+                                   faculty =="Vantage College"~"Vantage"
+                                   )) ->Single
+
+ggplot(Single,aes(x=short_faculty,y=average_utilization*100,fill=short_faculty))+
+  geom_bar(stat="identity", width = 0.5) +
+  geom_text(aes(label = paste0(round(average_utilization*100,1),"%"), vjust = -0.5))+
+  labs(y = "Average Room Utilization Rate (%)")+
+  labs(x = "Faculty or School")+
+  ggtitle ("Average RTS Utilization Rate on Faculty Level - Single Faculty")+
+  theme_bw()+
+  theme(panel.grid = element_blank(),axis.text.x=element_text(angle=45,hjust=1)) +
+  ylim(c(0,100)) +
+  facet_grid(rows = vars(roomgroup),scales="free_y") + theme(legend.title = element_blank(),legend.position = "none")
+
+#ggsave("single faculty RTS.png")
+
+```
+
+```{r}
+#Utilization rate faculty level by Tier 1 access - Multiple faculty Equal Share
+room_group1_multiple_1 <- room_group1_multiple
+room_group1_multiple_1$Share <- apply(room_group1_multiple_1[2:(ncol(room_group1_multiple_1)-4)], 1, function(x) {
+           x1 <- x[x!=0]
+           paste(names(x1),sep="", collapse=",")})
+separate_rows(room_group1_multiple_1,Share,convert=TRUE,sep = ",")->room_group1_multiple_1
+room_group1_multiple_2 <- room_group1_multiple
+room_group1_multiple_2$propotion <- apply(room_group1_multiple_2[2:(ncol(room_group1_multiple_2)-4)], 1, function(x) {
+           x1 <- x[x!=0]
+           paste(x1,sep="", collapse=",")})
+separate_rows(room_group1_multiple_2,propotion,convert=TRUE,sep = ",")->room_group1_multiple_2
+room_group1_multiple_1$dept_share <-room_group1_multiple_2$propotion
+room_group1_multiple_1->room_group1_multiple
+
+
+room_group2_multiple_1 <- room_group2_multiple
+room_group2_multiple_1$Share <- apply(room_group2_multiple_1[2:(ncol(room_group2_multiple_1)-4)], 1, function(x) {
+           x1 <- x[x!=0]
+           paste(names(x1),sep="", collapse=",")})
+separate_rows(room_group2_multiple_1,Share,convert=TRUE,sep = ",")->room_group2_multiple_1
+room_group2_multiple_2 <- room_group2_multiple
+room_group2_multiple_2$propotion <- apply(room_group2_multiple_2[2:(ncol(room_group2_multiple_2)-4)], 1, function(x) {
+           x1 <- x[x!=0]
+           paste(x1,sep="", collapse=",")})
+separate_rows(room_group2_multiple_2,propotion,convert=TRUE,sep = ",")->room_group2_multiple_2
+room_group2_multiple_1$dept_share <-room_group2_multiple_2$propotion
+room_group2_multiple_1->room_group2_multiple
+
+room_group3_multiple_1 <- room_group3_multiple
+room_group3_multiple_1$Share <- apply(room_group3_multiple_1[2:(ncol(room_group3_multiple_1)-4)], 1, function(x) {
+           x1 <- x[x!=0]
+           paste(names(x1),sep="", collapse=",")})
+separate_rows(room_group3_multiple_1,Share,convert=TRUE,sep = ",")->room_group3_multiple_1
+room_group3_multiple_2 <- room_group3_multiple
+room_group3_multiple_2$propotion <- apply(room_group3_multiple_2[2:(ncol(room_group3_multiple_2)-4)], 1, function(x) {
+           x1 <- x[x!=0]
+           paste(x1,sep="", collapse=",")})
+separate_rows(room_group3_multiple_2,propotion,convert=TRUE,sep = ",")->room_group3_multiple_2
+room_group3_multiple_1$dept_share <-room_group3_multiple_2$propotion
+room_group3_multiple_1->room_group3_multiple
+
+room_group4_multiple_1 <- room_group4_multiple
+room_group4_multiple_1$Share <- apply(room_group4_multiple_1[2:(ncol(room_group4_multiple_1)-4)], 1, function(x) {
+           x1 <- x[x!=0]
+           paste(names(x1),sep="", collapse=",")})
+separate_rows(room_group4_multiple_1,Share,convert=TRUE,sep = ",")->room_group4_multiple_1
+room_group4_multiple_2 <- room_group4_multiple
+room_group4_multiple_2$propotion <- apply(room_group4_multiple_2[2:(ncol(room_group4_multiple_2)-4)], 1, function(x) {
+           x1 <- x[x!=0]
+           paste(x1,sep="", collapse=",")})
+separate_rows(room_group4_multiple_2,propotion,convert=TRUE,sep = ",")->room_group4_multiple_2
+room_group4_multiple_1$dept_share <-room_group4_multiple_2$propotion
+room_group4_multiple_1->room_group4_multiple
+
+
+room_group1_multiple %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','Share' = 'Faculty...School.y')) %>% 
+  select(`var`,isGTS,count,Share,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/(1244.4/count)) %>% 
+  group_by(isGTS, Share) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS=="RTS") -> room_group1_multiple1
+
+
+room_group2_multiple %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','Share' = 'Faculty...School.y')) %>% 
+  select(`var`,isGTS,count,Share,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/(1244.4/count)) %>% 
+  group_by(isGTS, Share) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS=="RTS") -> room_group2_multiple2
+
+
+room_group3_multiple %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','Share' = 'Faculty...School.y')) %>% 
+  select(`var`,isGTS,count,Share,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/(1244.4/count)) %>% 
+  group_by(isGTS, Share) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS=="RTS") -> room_group3_multiple3
+
+room_group4_multiple %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','Share' = 'Faculty...School.y')) %>% 
+  select(`var`,isGTS,count,Share,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/(1244.4/count)) %>% 
+  group_by(isGTS, Share) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS=="RTS") -> room_group4_multiple4
+
+#Only the room group 1-100 has rooms with multiple faculties 
+
+
+
+```
+
+```{r}
+#Utilization rate faculty level by Tier 1 access - Multiple faculty Proportional Share
+room_group1_multiple %>% 
+  group_by(var) %>% 
+  summarise(totalshare = sum(dept_share))-> room_group1_multiple_totalshare
+
+room_group1_multiple %>% 
+  left_join(room_group1_multiple_totalshare,by=c("var" = "var")) %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','Share' = 'Faculty...School.y')) %>% 
+  select(`var`,isGTS,dept_share,totalshare,Share,total_session_hours) %>% 
+  
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/((dept_share/totalshare*1244.4))) %>% 
+  group_by(isGTS, Share) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS=="RTS") ->room_group1_multiple_1p
+
+
+room_group2_multiple %>% 
+  group_by(var) %>% 
+  summarise(totalshare = sum(dept_share))-> room_group2_multiple_totalshare
+
+room_group2_multiple %>% 
+  left_join(room_group2_multiple_totalshare,by=c("var" = "var")) %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','Share' = 'Faculty...School.y')) %>% 
+  select(`var`,isGTS,dept_share,totalshare,Share,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/(dept_share/totalshare*1244.4)) %>% 
+  group_by(isGTS, Share) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS=="RTS") ->room_group2_multiple_2p
+
+room_group3_multiple %>% 
+  group_by(var) %>% 
+  summarise(totalshare = sum(dept_share))-> room_group3_multiple_totalshare
+
+room_group3_multiple %>% 
+  left_join(room_group3_multiple_totalshare,by=c("var" = "var")) %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','Share' = 'Faculty...School.y')) %>% 
+  select(`var`,isGTS,dept_share,totalshare,Share,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/(dept_share/totalshare*1244.4)) %>% 
+  group_by(isGTS, Share) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS=="RTS") ->room_group3_multiple_3p
+
+
+room_group4_multiple %>% 
+  group_by(var) %>% 
+  summarise(totalshare = sum(dept_share))-> room_group4_multiple_totalshare
+
+room_group4_multiple %>% 
+  left_join(room_group4_multiple_totalshare,by=c("var" = "var")) %>% 
+  left_join(faculty_room_usage %>% filter(SEC_SES_YR=="2018"),by=c('var' = 'exactRoom','Share' = 'Faculty...School.y')) %>% 
+  select(`var`,isGTS,dept_share,totalshare,Share,total_session_hours) %>% 
+  mutate(isGTS = case_when(isGTS == "Unchecked"~"RTS",
+                           isGTS =="Checked"~"GTS")) %>% 
+  mutate(total_session_hours = ifelse(is.na(total_session_hours),0,total_session_hours)) %>% 
+  mutate(utilization = total_session_hours/(dept_share/totalshare*1244.4)) %>% 
+  group_by(isGTS, Share) %>% 
+  summarise(average_utilization = mean(utilization)) %>% 
+  filter(isGTS=="RTS") ->room_group4_multiple_4p
+
+
+```
+
+```{r}
+room_group1_multiple1 %>% 
+  mutate(method = "Equal Share") ->room_group1_multiple1
+room_group1_multiple_1p %>% 
+  mutate(method = "Propotional Share") ->room_group1_multiple_1p
+
+room_group_multiple <- rbind(room_group1_multiple1,room_group1_multiple_1p)
+
+room_group_multiple %>% 
+  mutate(faculty_short = case_when(Share =="Faculty of Applied Science"~"App. Sci.",
+                                   Share =="Faculty of Arts"~"Arts",
+                                   Share =="Faculty of Land and Food Systems"~"Land and Food",
+                                   Share =="Sauder School of Business"~"Sauder")) -> room_group_multiple
+
+
+ggplot(room_group_multiple,aes(x=faculty_short,y=average_utilization*100,fill=faculty_short))+
+  geom_bar(stat="identity", width = 0.5) +
+  geom_text(aes(label = paste0(round(average_utilization*100,1),"%")),vjust = -0.5)+
+  labs(y = "Average Room Utilization Rate (%)")+
+  labs(x = "Faculty or School")+
+  ggtitle ("Average RTS Utilization Rate on Faculty Level - Two Methods")+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=45,hjust=1)) +
+  ylim(c(0,100)) +
+  facet_grid(cols = vars(method),scales="free_y") + theme(legend.title = element_blank(),legend.position = "none")
+
+#ggsave("RTS multiple two methods.png")
+ 
+
+```
+

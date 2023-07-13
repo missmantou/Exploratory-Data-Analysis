@@ -1,0 +1,350 @@
+---
+title: "Room Usage Trend"
+author: "Eden ye"
+date: "7/3/2019"
+output: html_document
+---
+
+## Identify the evolution of classroom usage and where the classrooms are for departments year by year 
+
+```{r setup, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(viridis)
+library(purrr)
+library(scales)
+library(lubridate)
+library(stringr)
+library(kableExtra)
+library(gridExtra)
+library(ggthemes)
+library(markdown)
+library(rmarkdown)
+library(ggplot2)
+library(ggforce)
+library(dplyr)
+library(fpp2)
+library(tidyr)
+#install.packages('stringr')
+library(stringr)
+library(reshape2)
+library(plotly)
+library(plotrix)
+library(RColorBrewer)
+library(splitstackshape)
+
+
+```
+
+
+```{r}
+#Sahir's cleaned section data
+SectionData <- readRDS("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/sectionData.rds")
+#write.csv(SectionData,file="SectionData.csv")
+#Winter Data
+SectionDataWinter <- SectionData %>% 
+  filter(SEC_SES_CD =="W")
+
+#Sahir's Activity Data
+ActivityData <- readRDS("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/activityData.rds")
+
+#2013 data cleaned fro total registration analyisis
+TotalEnrol <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/dataFrame_TotalEnrol.csv")
+#Atlas claned section data for room analysis
+atlas <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/sectionData_ready_for_room_analysis.csv")
+
+#New dept to faculty data
+Dept_to_Faculty <- read.csv("W:/COE/coeprojects/UBC/2019_IN_Course_Schedule/06_COE_Deliverables/Codes/Data/Course Codes to Faculty-08.02.19.csv")
+
+```
+
+Room Usage + Room Utilization 
+
+Teaching Days: https://senate.ubc.ca/vancouver/termdates/archive
+2013:60 + 60
+2014:61 + 61
+2015:61 + 62
+2016:61 + 62
+2017:61 + 62
+2018:61 + 60
+
+Average teaching days in 6 years are 122 days,24.4 weeks, standard day time per week is 51 hours, 24.4 * 51 =  1244.4 hours
+
+```{r}
+##########################################################
+#Data Preparation for room usage + utilization analysis
+##########################################################
+atlas %>% 
+  mutate(DAYSMET = as.character(DAYSMET)) %>% 
+  filter(nchar(DAYSMET)>1) ->TEST
+atlas %>% 
+  mutate(DAYSMET = as.character(DAYSMET)) %>% 
+  filter(nchar(DAYSMET)<=1) -> TEST2
+
+
+#there are 52 NA values in DAYSMET column
+#table(is.na(atlas$DAYSMET))
+
+TEST %>% 
+  rowwise() %>% 
+  mutate(DAYSMET = strsplit(DAYSMET,split='')) %>% 
+  mutate(DAYSMET = paste0(DAYSMET, collapse=",")) -> TEST
+  
+separate_rows(TEST,DAYSMET,sep=",") -> TEST
+
+TEST %>% 
+  full_join(TEST2) %>% 
+  arrange(X) ->TEST3
+
+TEST3$weekCount[TEST3$weekCount >= 31] <- 24
+
+TEST3$START_TIME <-hms(TEST3$START_TIME)
+TEST3$END_TIME <- hms(TEST3$END_TIME)
+
+#Convert the start time and end time to be within standard time table
+TEST3$END_TIME[TEST3$DAYSMET == "T" & TEST3$END_TIME >= hms("18:30:00")] <- hms("18:30:00")
+TEST3$END_TIME[TEST3$DAYSMET == "R" & TEST3$END_TIME >= hms("18:30:00")] <- hms("18:30:00")
+TEST3$END_TIME[TEST3$DAYSMET == "M" & TEST3$END_TIME >= hms("18:00:00")] <- hms("18:00:00")
+TEST3$END_TIME[TEST3$DAYSMET == "W" & TEST3$END_TIME >= hms("18:00:00")] <- hms("18:00:00")
+TEST3$END_TIME[TEST3$DAYSMET == "F" & TEST3$END_TIME >= hms("18:00:00")] <- hms("18:00:00")
+TEST3$START_TIME[TEST3$START_TIME<= hms("8:00:00")] <- hms("8:00:00")
+
+#Redo the TRUE/FALSE table
+TEST3 %>% 
+  mutate(`U` = str_detect(DAYSMET, "U"),
+         `M` = str_detect(DAYSMET, "M"),
+         `T` = str_detect(DAYSMET, "T"),
+         `W` = str_detect(DAYSMET, "W"),
+         `R` = str_detect(DAYSMET, "R"),
+         `F` = str_detect(DAYSMET, "F"),
+         `S` = str_detect(DAYSMET, "S")) ->TEST3
+```
+
+```{r}
+#######################################################################
+#GTS room groups  - Total number of hours occupied in Winter Session 
+#######################################################################
+GTS<- TEST3 %>%
+  filter(Total_Enrolment>0) %>%
+  dplyr::filter(SEC_SES_CD =="W") %>% 
+  filter(roomGroup !="Unidentified") %>% 
+  filter(isGTS==1) %>%
+  filter(inStandardTimetable== 1) %>% 
+  mutate(START_DATE = as.Date(START_DATE, format="%Y-%m-%d"),
+         END_DATE=as.Date(END_DATE, format="%Y-%m-%d"),
+         duration_new = as.numeric(END_TIME - START_TIME)) %>% 
+  filter(START_DATE>="2013-09-03" & END_DATE<="2013-11-29"|
+          START_DATE>="2013-09-03" & END_DATE<="2014-04-08"| 
+           START_DATE>="2014-01-02" & END_DATE<="2014-04-08"|
+           START_DATE>="2014-09-02" & END_DATE<="2014-11-28"|
+           START_DATE>="2014-09-02" & END_DATE<="2015-04-10"|
+           START_DATE>="2015-01-06" & END_DATE<="2015-04-10"|
+           START_DATE>="2015-09-08" & END_DATE<="2015-12-04"|
+           START_DATE>="2015-09-08" & END_DATE<="2016-04-08"|
+           START_DATE>="2016-01-05" & END_DATE<="2016-04-08"|
+           START_DATE>="2016-09-06" & END_DATE<="2016-12-02"|
+           START_DATE>="2016-09-06" & END_DATE<="2017-04-06"|
+           START_DATE>="2017-01-04" & END_DATE<="2017-04-06"|
+           START_DATE>="2017-09-05" & END_DATE<="2017-12-01"|
+           START_DATE>="2017-09-05" & END_DATE<="2018-04-06"|
+           START_DATE>="2018-01-03" & END_DATE<="2018-04-06"|
+           START_DATE>="2018-09-04" & END_DATE<="2018-11-30"|
+           START_DATE>="2018-09-04" & END_DATE<="2019-04-06"|
+           START_DATE>="2019-01-02" & END_DATE<="2019-04-06") %>% 
+  select(SEC_SES_YR,roomGroup,DAYSMET,duration_new,M,`T`,W,R,`F`,weekCount) %>% 
+  mutate(duration_new = duration_new/3600) %>% 
+  mutate(M = case_when(M ==1 ~duration_new,
+                       M ==0 ~ 0)) %>% 
+  mutate(`T` = case_when(`T` ==1 ~ duration_new,
+                       `T` ==0 ~ 0)) %>% 
+  mutate(W = case_when(W ==1 ~ duration_new,
+                       W ==0 ~ 0)) %>% 
+  mutate(R = case_when(R ==1 ~ duration_new,
+                       R ==0 ~ 0)) %>% 
+  mutate(`F` = case_when(`F` ==1 ~ duration_new,
+                       `F` ==0 ~ 0)) %>% 
+  mutate(sessionhours = (M+`T`+W+R+`F`)*weekCount) %>% 
+  dplyr::group_by(SEC_SES_YR,roomGroup) %>% 
+  dplyr::summarise(total_session_hours = sum(sessionhours,na.rm=TRUE)) %>% 
+  drop_na()
+
+GTS$roomGroup = factor(GTS$roomGroup, levels=c("1-20","21-50","51-70","71-100","101-150","151-200","201-300","Over 300","Unidentified"))
+
+bp <- ggplot(GTS, aes(x=SEC_SES_YR, y = total_session_hours/1000,color=roomGroup)) +
+  geom_line(size = 0.5) +
+  geom_point()+
+  theme_bw()+
+  ggtitle ("What rooms sizes are used more over time? - GTS") +
+  ylab ("Total number of hours occupied (in thousand hrs)") +
+  xlab ("Year") +
+  scale_color_discrete(name="Room Group")+
+  theme(strip.text = element_text(size=6))
+
+bp + facet_grid(rows = vars(roomGroup),scales="free_y") + theme(legend.title = element_blank(),legend.position = "none",strip.text.x = element_text(margin = margin(.1, 0, .1, 0, "cm")))
+
+#
+ggsave("room usage - GTS.png")
+################################################
+#Room Utilization Rate GTS
+###############################################
+
+GTS_room_num <- atlas %>% 
+  filter(isGTS==1) %>% 
+  filter(SEC_SES_CD =="W") %>% 
+  # filter(SEC_SES == "2018W") %>% 
+  filter(inStandardTimetable ==1 ) %>% 
+  select(SEC_SES_YR,exactRoom,roomGroup) %>% 
+  dplyr::group_by(SEC_SES_YR,roomGroup) %>% 
+  summarize(room_num = n_distinct(exactRoom)) %>% 
+  drop_na
+
+GTS %>% 
+  left_join(GTS_room_num,by=c("SEC_SES_YR"="SEC_SES_YR", "roomGroup" = "roomGroup")) %>% 
+  mutate(total_hour_per_room = total_session_hours/room_num) %>% 
+  mutate(room_utilization = total_hour_per_room/1244.4)-> GTS_per_room
+
+GTS_per_room$roomGroup = factor(GTS_per_room$roomGroup, levels=c("1-20","21-50","51-70","71-100","101-150","151-200","201-300","Over 300"))
+
+bp_average <- ggplot(GTS_per_room, aes(x=SEC_SES_YR, y = room_utilization,col=roomGroup)) + 
+  geom_line(size=1) + 
+  geom_line(y=0.7,linetype="dotted",size = 1,colour = "black")+
+  geom_point() +
+  theme_bw() +
+  ggtitle ("Room Utilization Trend from 2013 to 2018 - GTS") +
+  ylab ("Room Utilization Rate") +
+  xlab ("Year") +
+  scale_color_discrete(name="Room Group")+
+  annotate("text",label='atop(bold("70%"))', x = 2018,  y = 0.7,colour = "black",parse=TRUE,size=5)+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle =element_text(hjust = 0.5)) +
+  ylim(c(0,1))
+
+bp_average +coord_fixed(ratio=3)
+
+#ggsave("Room utilization per room size - GTS.png")
+
+#2018 Room Utilization 
+GTS_per_room %>% 
+  filter(SEC_SES_YR =="2018") %>% 
+  select(roomGroup, room_utilization)
+
+#2018 Number of GTS actively used
+GTS_room_num %>% 
+filter(SEC_SES_YR == "2018")
+```
+
+```{r}
+#######################################################################
+#RTS room groups  - Total number of hours occupied in Winter Session 
+#######################################################################
+RTS<- TEST3 %>%
+  filter(Total_Enrolment>0) %>%
+  dplyr::filter(SEC_SES_CD =="W") %>% 
+  filter(roomGroup !="Unidentified") %>% 
+  filter(isGTS==0) %>%
+  filter(inStandardTimetable== 1) %>% 
+  mutate(START_DATE = as.Date(START_DATE, format="%Y-%m-%d"),
+         END_DATE=as.Date(END_DATE, format="%Y-%m-%d"),
+         duration_new = as.numeric(END_TIME - START_TIME)) %>% 
+  filter(START_DATE>="2013-09-03" & END_DATE<="2013-11-29"|
+          START_DATE>="2013-09-03" & END_DATE<="2014-04-08"| 
+           START_DATE>="2014-01-02" & END_DATE<="2014-04-08"|
+           START_DATE>="2014-09-02" & END_DATE<="2014-11-28"|
+           START_DATE>="2014-09-02" & END_DATE<="2015-04-10"|
+           START_DATE>="2015-01-06" & END_DATE<="2015-04-10"|
+           START_DATE>="2015-09-08" & END_DATE<="2015-12-04"|
+           START_DATE>="2015-09-08" & END_DATE<="2016-04-08"|
+           START_DATE>="2016-01-05" & END_DATE<="2016-04-08"|
+           START_DATE>="2016-09-06" & END_DATE<="2016-12-02"|
+           START_DATE>="2016-09-06" & END_DATE<="2017-04-06"|
+           START_DATE>="2017-01-04" & END_DATE<="2017-04-06"|
+           START_DATE>="2017-09-05" & END_DATE<="2017-12-01"|
+           START_DATE>="2017-09-05" & END_DATE<="2018-04-06"|
+           START_DATE>="2018-01-03" & END_DATE<="2018-04-06"|
+           START_DATE>="2018-09-04" & END_DATE<="2018-11-30"|
+           START_DATE>="2018-09-04" & END_DATE<="2019-04-06"|
+           START_DATE>="2019-01-02" & END_DATE<="2019-04-06") %>% 
+  select(SEC_SES_YR,roomGroup,DAYSMET,duration_new,M,`T`,W,R,`F`,weekCount) %>% 
+  mutate(duration_new = duration_new/3600) %>% 
+  mutate(M = case_when(M ==1 ~duration_new,
+                       M ==0 ~ 0)) %>% 
+  mutate(`T` = case_when(`T` ==1 ~ duration_new,
+                       `T` ==0 ~ 0)) %>% 
+  mutate(W = case_when(W ==1 ~ duration_new,
+                       W ==0 ~ 0)) %>% 
+  mutate(R = case_when(R ==1 ~ duration_new,
+                       R ==0 ~ 0)) %>% 
+  mutate(`F` = case_when(`F` ==1 ~ duration_new,
+                       `F` ==0 ~ 0)) %>% 
+  mutate(sessionhours = (M+`T`+W+R+`F`)*weekCount) %>% 
+  dplyr::group_by(SEC_SES_YR,roomGroup) %>% 
+  dplyr::summarise(total_session_hours = sum(sessionhours,na.rm=TRUE)) %>% 
+  drop_na()
+
+
+RTS$roomGroup = factor(GTS$roomGroup, levels=c("1-20","21-50","51-70","71-100","101-150","151-200","201-300","Over 300","Unidentified"))
+
+bp2 <- ggplot(RTS, aes(x=SEC_SES_YR, y = total_session_hours/1000,color=roomGroup)) +
+  geom_line(size = 0.5) +
+  geom_point()+
+  theme_bw()+
+  ggtitle ("What rooms sizes are used more over time? - RTS") +
+  ylab ("Total number of hours occupied (in thousand hrs)") +
+  xlab ("Year") +
+  scale_color_discrete(name="Room Group")+
+  theme(strip.text = element_text(size=6))
+
+bp2 + facet_grid(rows = vars(roomGroup),scales="free_y") + theme(legend.title = element_blank(),legend.position = "none",strip.text.x = element_text(margin = margin(.1, 0, .1, 0, "cm")))
+
+#ggsave("room usage - RTS.png")
+
+################################################
+#Room Utilization Rate RTS
+###############################################
+
+RTS_room_num <- atlas %>% 
+  filter(isGTS==0) %>% 
+  filter(SEC_SES_CD =="W") %>% 
+  filter(inStandardTimetable ==1 ) %>% 
+  select(SEC_SES_YR,exactRoom,roomGroup) %>% 
+  dplyr::group_by(SEC_SES_YR,roomGroup) %>% 
+  summarize(room_num = n_distinct(exactRoom)) %>% 
+  drop_na()
+
+RTS %>% 
+  left_join(RTS_room_num,by=c("SEC_SES_YR"="SEC_SES_YR", "roomGroup" = "roomGroup")) %>% 
+  mutate(total_hour_per_room = total_session_hours/room_num) %>% 
+  mutate(room_utilization = total_hour_per_room/1244.4)-> RTS_per_room
+
+RTS_per_room$roomGroup = factor(RTS_per_room$roomGroup, levels=c("1-20","21-50","51-70","71-100","101-150","151-200","201-300","Over 300"))
+
+bp_average2 <- ggplot(RTS_per_room, aes(x=SEC_SES_YR, y = room_utilization,col=roomGroup)) + 
+  geom_line(size=1) + 
+  geom_line(y=0.7,linetype="dotted",size = 1,colour = "black")+
+  geom_point() +
+  theme_bw() +
+  ggtitle ("Room Utilization Trend from 2013 to 2018 - RTS") +
+  ylab ("Room Utilization Rate") +
+  xlab ("Year") +
+  scale_color_discrete(name="Room Group")+
+  annotate("text",label='atop(bold("70%"))', x = 2018,  y = 0.7,colour = "black",parse=TRUE,size=5)+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle =element_text(hjust = 0.5)) +
+  ylim(c(0,1))
+
+bp_average2 +coord_fixed(ratio=3)
+
+#ggsave("Room utilization per room size - RTS.png")
+
+#2018 RTS Utilization 
+RTS_per_room %>%
+  filter(SEC_SES_YR == "2018") %>% 
+  select(roomGroup, room_utilization)
+
+#2018 Number of RTS actively used
+RTS_room_num %>%
+  filter(SEC_SES_YR == "2018") %>% 
+  filter(roomGroup != "Unidentified")
+
+```
+
+
+
